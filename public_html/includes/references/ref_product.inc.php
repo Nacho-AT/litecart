@@ -413,38 +413,63 @@
 
             $row['name'] = [];
 
-            foreach (explode(',', $row['combination']) as $combination) {
-              list($group_id, $value_id) = explode('-', $combination);
-
-              if (preg_match('#^0:"?(.*?)"?$#', $value_id, $matches)) {
-
-                foreach (array_keys(language::$languages) as $language_code) {
-                  $row['name'][$language_code] = $matches[1];
-                }
-
-              } else {
-
-                $options_values_query = database::query(
-                  "select * from ". DB_TABLE_PREFIX ."products_options_values pov
-                  left join ". DB_TABLE_PREFIX ."attribute_values_info avi on (avi.value_id = pov.value_id)
-                  where pov.value_id = ". (int)$value_id ."
-                  and avi.language_code in ('". implode("', '", database::input($this->_language_codes)) ."')
-                  order by field(avi.language_code, '". implode("', '", database::input($this->_language_codes)) ."');"
-                );
-
-                while ($option_value_info = database::fetch($options_values_query)) {
-                  foreach ($option_value_info as $key => $value) {
-                    if (in_array($key, ['id', 'value_id', 'language_code'])) continue;
-                    if (!is_array(empty($row[$key][$option_value_info['value_id']]))) continue;
-                    if (empty($row[$key][$option_value_info['value_id']])) {
-                      $row[$key][$option_value_info['value_id']] = $value;
-                    }
+// === IMPROVEMENT: Process group_id and human-readable names] ===
+          
+              $row['options'] = [];
+          
+              $combination_parts = explode(',', $row['combination']);
+          
+              foreach ($combination_parts as $part) {
+                list($group_id, $value_id) = explode('-', $part);
+          
+                // Caso de valor personalizado con texto libre
+                if (preg_match('#^0:"?(.*?)"?$#', $value_id, $matches)) {
+                  $value_text = $matches[1];
+                  foreach (array_keys(language::$languages) as $lang) {
+                    $row['name'][$lang][] = $value_text;
                   }
+                  $row['options'][] = [
+                    'group_id'   => (int)$group_id,
+                    'group_name' => 'Custom',
+                    'value_id'   => null,
+                    'value_name' => $value_text,
+                  ];
+                  continue;
                 }
+          
+                // Group name
+                $group_query = database::query(
+                  "SELECT name FROM ". DB_TABLE_PREFIX ."attribute_groups_info
+                   WHERE group_id = ". (int)$group_id ."
+                   AND language_code = '". database::input($this->_language_codes[0]) ."'
+                   LIMIT 1;"
+                );
+                $group_name = database::fetch($group_query, 'name') ?? '';
+          
+                // Value name
+                $value_query = database::query(
+                  "SELECT name FROM ". DB_TABLE_PREFIX ."attribute_values_info
+                   WHERE value_id = ". (int)$value_id ."
+                   AND language_code = '". database::input($this->_language_codes[0]) ."'
+                   LIMIT 1;"
+                );
+                $value_name = database::fetch($value_query, 'name') ?? '';
+          
+                $row['name'][$this->_language_codes[0]][] = $value_name;
+          
+                $row['options'][] = [
+                  'group_id'   => (int)$group_id,
+                  'group_name' => $group_name,
+                  'value_id'   => (int)$value_id,
+                  'value_name' => $value_name,
+                ];
               }
-            }
-
-            $row['name'] = implode(',', $row['name']);
+          
+              // Concatenate readable name (in the primary language)
+              $first_lang = array_key_first($row['name']);
+              $row['name'] = implode(', ', $row['name'][$first_lang]);
+          
+// === IMPROVEMENT END  ===
 
             $this->_data['options_stock'][$row['id']] = $row;
           }
